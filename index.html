@@ -565,7 +565,8 @@ async function refreshLivePrices(){
   if(watchlist.length === 0) return;
   const ids = watchlist.map(c => c.id).join(',');
   try{
-    const res = await fetch(`${API}/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`);
+    const res = await fetchWithRetry(`${API}/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`, 1);
+    if(res.status === 429) return; // skip this cycle quietly, next poll will retry
     const data = await res.json();
     watchlist.forEach(c => {
       if(data[c.id]){
@@ -726,19 +727,50 @@ function renderRungs(){
 }
 
 /* ---------- Chart ---------- */
+const chartCache = {}; // key: `${coinId}_${days}` -> {points, ts}
+const CHART_CACHE_TTL = 60000; // 60s
+
+async function fetchWithRetry(url, attempts=2){
+  for(let i=0;i<attempts;i++){
+    const res = await fetch(url);
+    if(res.status === 429){
+      // rate limited — wait, then retry
+      const wait = 4000 * (i+1);
+      await new Promise(r => setTimeout(r, wait));
+      continue;
+    }
+    return res;
+  }
+  return fetch(url); // final attempt, let caller handle failure
+}
+
 async function loadChart(){
   const coin = watchlist.find(c => c.id === activeId);
   if(!coin) return;
   const statusEl = document.getElementById('chartStatus');
+  const range = RANGES[currentRangeIdx];
+  const cacheKey = `${coin.id}_${range.days}`;
+
+  const cached = chartCache[cacheKey];
+  if(cached && (Date.now() - cached.ts) < CHART_CACHE_TTL){
+    statusEl.style.display = 'none';
+    drawChart(cached.points, coin);
+    return;
+  }
+
   statusEl.style.display = 'flex';
   statusEl.textContent = 'Loading chart…';
 
-  const range = RANGES[currentRangeIdx];
   try{
-    const res = await fetch(`${API}/coins/${coin.id}/market_chart?vs_currency=usd&days=${range.days}`);
-    if(!res.ok) throw new Error('bad response');
+    const res = await fetchWithRetry(`${API}/coins/${coin.id}/market_chart?vs_currency=usd&days=${range.days}`);
+    if(res.status === 429){
+      statusEl.textContent = 'CoinGecko rate limit hit — pausing a moment. This clears on its own within a minute or two.';
+      return;
+    }
+    if(!res.ok) throw new Error('bad response: ' + res.status);
     const data = await res.json();
     const points = (data.prices || []).map(p => ({x: p[0], y: p[1]}));
+    chartCache[cacheKey] = { points, ts: Date.now() };
     statusEl.style.display = 'none';
     drawChart(points, coin);
   }catch(err){
@@ -837,7 +869,7 @@ function applyAnnotations(){
 renderWatchlist();
 renderTicker();
 refreshLivePrices();
-setInterval(refreshLivePrices, 45000); // poll every 45s, mindful of free-tier rate limits
+setInterval(refreshLivePrices, 75000); // poll every 75s, mindful of free-tier rate limits
 </script>
 </body>
 </html>
