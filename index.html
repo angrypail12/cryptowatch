@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ledger — Crypto Watch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<style>
+  :root{
+    --bg:#12161B;
+    --panel:#1A2026;
+    --panel-raised:#202832;
+    --line:#2B333D;
+    --gold:#C9A227;
+    --gold-dim:#8C7220;
+    --up:#4F9D69;
+    --down:#C75450;
+    --text:#E8E3D8;
+    --muted:#8A9099;
+    --mono:'IBM Plex Mono', monospace;
+    --serif:'Source Serif 4', serif;
+    --sans:'Inter', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+  body{min-height:100vh;}
+  a{color:var(--gold);}
+
+  /* ticker tape header */
+  .ticker-bar{
+    background:var(--panel-raised);
+    border-bottom:1px solid var(--line);
+    overflow:hidden;
+    white-space:nowrap;
+    height:34px;
+    display:flex;
+    align-items:center;
+  }
+  .ticker-track{
+    display:flex;
+    gap:36px;
+    padding-left:20px;
+    animation:scroll 38s linear infinite;
+    font-family:var(--mono);
+    font-size:12.5px;
+  }
+  .ticker-track span.up{color:var(--up);}
+  .ticker-track span.down{color:var(--down);}
+  @keyframes scroll{
+    0%{transform:translateX(0);}
+    100%{transform:translateX(-50%);}
+  }
+
+  header.masthead{
+    padding:28px 32px 18px;
+    border-bottom:1px solid var(--line);
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  header.masthead h1{
+    font-family:var(--serif);
+    font-weight:700;
+    font-size:28px;
+    letter-spacing:0.3px;
+    margin:0;
+  }
+  header.masthead h1 .rule{
+    color:var(--gold);
+  }
+  header.masthead .sub{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--muted);
+    letter-spacing:0.5px;
+  }
+
+  .layout{
+    display:grid;
+    grid-template-columns:280px 1fr;
+    min-height:calc(100vh - 110px);
+  }
+  @media (max-width:860px){
+    .layout{grid-template-columns:1fr;}
+  }
+
+  /* sidebar */
+  .sidebar{
+    border-right:1px solid var(--line);
+    padding:20px;
+    display:flex;
+    flex-direction:column;
+    gap:16px;
+  }
+  .add-coin{
+    position:relative;
+  }
+  .add-coin input{
+    width:100%;
+    background:var(--panel);
+    border:1px solid var(--line);
+    color:var(--text);
+    padding:10px 12px;
+    font-family:var(--sans);
+    font-size:14px;
+    border-radius:3px;
+    outline:none;
+  }
+  .add-coin input:focus{border-color:var(--gold-dim);}
+  .add-coin .results{
+    position:absolute;
+    top:42px;left:0;right:0;
+    background:var(--panel-raised);
+    border:1px solid var(--line);
+    border-radius:3px;
+    max-height:280px;
+    overflow-y:auto;
+    z-index:20;
+    display:none;
+  }
+  .add-coin .results.show{display:block;}
+  .add-coin .result-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:8px 10px;
+    cursor:pointer;
+    font-size:13px;
+  }
+  .add-coin .result-row:hover{background:var(--panel);}
+  .add-coin .result-row img{width:18px;height:18px;border-radius:50%;}
+  .add-coin .result-row .sym{color:var(--muted);font-family:var(--mono);font-size:11px;margin-left:auto;}
+
+  .watchlist-label{
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:1.5px;
+    color:var(--muted);
+    text-transform:uppercase;
+    border-bottom:1px solid var(--line);
+    padding-bottom:8px;
+  }
+  .watchlist{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    overflow-y:auto;
+  }
+  .watch-item{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:10px 8px;
+    border-radius:4px;
+    cursor:pointer;
+    border:1px solid transparent;
+  }
+  .watch-item:hover{background:var(--panel);}
+  .watch-item.active{
+    background:var(--panel-raised);
+    border-color:var(--gold-dim);
+  }
+  .watch-item img{width:22px;height:22px;border-radius:50%;flex:none;}
+  .watch-item .wname{
+    font-size:13px;
+    flex:1;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .watch-item .wname small{display:block;color:var(--muted);font-family:var(--mono);font-size:10px;}
+  .watch-item .wprice{
+    font-family:var(--mono);
+    font-size:12px;
+    text-align:right;
+  }
+  .watch-item .wprice .chg{display:block;font-size:10px;}
+  .watch-item .remove{
+    color:var(--muted);
+    font-size:14px;
+    padding:2px 4px;
+    visibility:hidden;
+  }
+  .watch-item:hover .remove{visibility:visible;}
+  .watch-item .remove:hover{color:var(--down);}
+
+  .empty-note{
+    color:var(--muted);
+    font-size:12.5px;
+    line-height:1.5;
+    padding:6px 2px;
+  }
+
+  /* main panel */
+  .main{
+    padding:24px 32px 40px;
+    display:flex;
+    flex-direction:column;
+    gap:24px;
+  }
+  .no-selection{
+    margin:auto;
+    text-align:center;
+    color:var(--muted);
+    font-family:var(--serif);
+    font-size:18px;
+    max-width:340px;
+    line-height:1.6;
+  }
+
+  .coin-header{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:14px;
+  }
+  .coin-title{
+    display:flex;
+    align-items:center;
+    gap:12px;
+  }
+  .coin-title img{width:34px;height:34px;border-radius:50%;}
+  .coin-title h2{
+    font-family:var(--serif);
+    font-size:26px;
+    margin:0;
+    font-weight:600;
+  }
+  .coin-title .sym{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--muted);
+    text-transform:uppercase;
+  }
+  .price-block{text-align:right;}
+  .price-block .price{
+    font-family:var(--mono);
+    font-size:30px;
+    font-weight:500;
+  }
+  .price-block .chg{
+    font-family:var(--mono);
+    font-size:13px;
+  }
+  .chg.up{color:var(--up);}
+  .chg.down{color:var(--down);}
+
+  .range-controls{
+    display:flex;
+    gap:6px;
+    flex-wrap:wrap;
+  }
+  .range-controls button{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--muted);
+    font-family:var(--mono);
+    font-size:12px;
+    padding:6px 12px;
+    border-radius:3px;
+    cursor:pointer;
+  }
+  .range-controls button:hover{color:var(--text);border-color:var(--gold-dim);}
+  .range-controls button.active{
+    color:var(--bg);
+    background:var(--gold);
+    border-color:var(--gold);
+  }
+
+  .chart-panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:20px;
+    position:relative;
+  }
+  .chart-wrap{height:380px;position:relative;}
+  .chart-status{
+    position:absolute;inset:0;
+    display:flex;align-items:center;justify-content:center;
+    color:var(--muted);font-family:var(--mono);font-size:12px;
+  }
+
+  /* sale ladder */
+  .ladder-panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:20px 24px;
+  }
+  .ladder-panel h3{
+    font-family:var(--serif);
+    font-size:16px;
+    margin:0 0 4px;
+    font-weight:600;
+  }
+  .ladder-panel .ladder-sub{
+    color:var(--muted);
+    font-size:12px;
+    margin-bottom:16px;
+  }
+  .rungs{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+  .rung{
+    display:grid;
+    grid-template-columns:70px 1fr 130px 90px 26px;
+    align-items:center;
+    gap:12px;
+    padding:10px 12px;
+    background:var(--panel-raised);
+    border-radius:4px;
+    border-left:3px solid var(--line);
+  }
+  .rung.hit{border-left-color:var(--up);}
+  .rung.pending{border-left-color:var(--gold);}
+  .rung-label{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--muted);
+    letter-spacing:1px;
+  }
+  .rung input[type=number]{
+    background:var(--bg);
+    border:1px solid var(--line);
+    color:var(--text);
+    font-family:var(--mono);
+    font-size:14px;
+    padding:7px 9px;
+    border-radius:3px;
+    width:100%;
+    outline:none;
+  }
+  .rung input:focus{border-color:var(--gold-dim);}
+  .rung-track{
+    height:6px;
+    background:var(--bg);
+    border-radius:3px;
+    overflow:hidden;
+    position:relative;
+  }
+  .rung-track .fill{
+    height:100%;
+    background:var(--gold);
+    border-radius:3px;
+  }
+  .rung-dist{
+    font-family:var(--mono);
+    font-size:12px;
+    text-align:right;
+    color:var(--muted);
+  }
+  .rung-dist.hit{color:var(--up);}
+  .rung-clear{
+    color:var(--muted);
+    cursor:pointer;
+    text-align:center;
+    font-size:13px;
+  }
+  .rung-clear:hover{color:var(--down);}
+
+  ::-webkit-scrollbar{width:8px;}
+  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
+
+  footer.note{
+    padding:18px 32px 30px;
+    color:var(--muted);
+    font-size:11.5px;
+    border-top:1px solid var(--line);
+    font-family:var(--mono);
+    line-height:1.6;
+  }
+</style>
+</head>
+<body>
+
+<div class="ticker-bar">
+  <div class="ticker-track" id="tickerTrack">
+    <span>LOADING TICKER…</span>
+  </div>
+</div>
+
+<header class="masthead">
+  <h1>LEDGER <span class="rule">/</span> watch</h1>
+  <div class="sub">PERSONAL CRYPTO WATCHLIST — DATA: COINGECKO</div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="add-coin">
+      <input type="text" id="searchInput" placeholder="Add a coin… (e.g. bitcoin)" autocomplete="off">
+      <div class="results" id="searchResults"></div>
+    </div>
+    <div class="watchlist-label">Watchlist</div>
+    <div class="watchlist" id="watchlist">
+      <div class="empty-note">Nothing tracked yet. Search above to add the first one.</div>
+    </div>
+  </aside>
+
+  <main class="main" id="mainPanel">
+    <div class="no-selection">Pick a coin from your watchlist, or add one, to see its chart and sale ladder.</div>
+  </main>
+</div>
+
+<footer class="note">
+  Prices via the public CoinGecko API. Free-tier rate limits apply — if data stops loading, wait a minute and refresh.
+  Your watchlist and price targets are stored only in this browser (localStorage); they won't follow you to another device or browser.
+</footer>
+
+<script>
+const STORAGE_KEY = 'ledger_watchlist_v1';
+const API = 'https://api.coingecko.com/api/v3';
+
+let watchlist = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+let activeId = null;
+let chart = null;
+let livePrices = {}; // id -> {usd, change24h}
+
+const RANGES = [
+  {label:'1D', days:1},
+  {label:'7D', days:7},
+  {label:'1M', days:30},
+  {label:'6M', days:180},
+  {label:'1Y', days:365},
+  {label:'ALL', days:'max'},
+];
+let currentRangeIdx = 2; // default 1M
+
+function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(watchlist)); }
+
+function fmtPrice(n){
+  if(n === null || n === undefined || isNaN(n)) return '—';
+  if(n >= 1000) return '$' + n.toLocaleString(undefined,{maximumFractionDigits:0});
+  if(n >= 1) return '$' + n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(n >= 0.01) return '$' + n.toFixed(4);
+  return '$' + n.toPrecision(3);
+}
+function fmtChange(n){
+  if(n === null || n === undefined || isNaN(n)) return '—';
+  const sign = n >= 0 ? '+' : '';
+  return sign + n.toFixed(2) + '%';
+}
+
+/* ---------- Search ---------- */
+let searchTimer = null;
+const searchInput = document.getElementById('searchInput');
+const searchResults = document.getElementById('searchResults');
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchInput.value.trim();
+  if(q.length < 2){ searchResults.classList.remove('show'); return; }
+  searchTimer = setTimeout(() => doSearch(q), 350);
+});
+document.addEventListener('click', (e) => {
+  if(!e.target.closest('.add-coin')) searchResults.classList.remove('show');
+});
+
+async function doSearch(q){
+  try{
+    const res = await fetch(`${API}/search?query=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    const coins = (data.coins || []).slice(0, 12);
+    if(coins.length === 0){
+      searchResults.innerHTML = '<div class="empty-note" style="padding:10px;">No matches.</div>';
+    } else {
+      searchResults.innerHTML = coins.map(c => `
+        <div class="result-row" data-id="${c.id}" data-name="${escapeHtml(c.name)}" data-symbol="${c.symbol}" data-image="${c.thumb}">
+          <img src="${c.thumb}" alt="">
+          <span>${escapeHtml(c.name)}</span>
+          <span class="sym">${c.symbol.toUpperCase()}</span>
+        </div>
+      `).join('');
+    }
+    searchResults.classList.add('show');
+    searchResults.querySelectorAll('.result-row').forEach(row => {
+      row.addEventListener('click', () => {
+        addCoin({
+          id: row.dataset.id,
+          name: row.dataset.name,
+          symbol: row.dataset.symbol,
+          image: row.dataset.image.replace('thumb','large')
+        });
+        searchInput.value = '';
+        searchResults.classList.remove('show');
+      });
+    });
+  }catch(err){
+    searchResults.innerHTML = '<div class="empty-note" style="padding:10px;">Search failed — try again shortly.</div>';
+    searchResults.classList.add('show');
+  }
+}
+
+function escapeHtml(s){
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function addCoin(coin){
+  if(watchlist.find(c => c.id === coin.id)) { activeId = coin.id; renderWatchlist(); selectCoin(coin.id); return; }
+  watchlist.push({
+    id: coin.id, name: coin.name, symbol: coin.symbol, image: coin.image,
+    targets: [null, null, null]
+  });
+  save();
+  renderWatchlist();
+  selectCoin(coin.id);
+}
+
+function removeCoin(id, evt){
+  evt.stopPropagation();
+  watchlist = watchlist.filter(c => c.id !== id);
+  save();
+  if(activeId === id){ activeId = null; document.getElementById('mainPanel').innerHTML = '<div class="no-selection">Pick a coin from your watchlist, or add one, to see its chart and sale ladder.</div>'; }
+  renderWatchlist();
+}
+
+/* ---------- Watchlist render ---------- */
+function renderWatchlist(){
+  const el = document.getElementById('watchlist');
+  if(watchlist.length === 0){
+    el.innerHTML = '<div class="empty-note">Nothing tracked yet. Search above to add the first one.</div>';
+    return;
+  }
+  el.innerHTML = watchlist.map(c => {
+    const live = livePrices[c.id];
+    const price = live ? fmtPrice(live.usd) : '…';
+    const chg = live ? fmtChange(live.change24h) : '';
+    const chgClass = live && live.change24h >= 0 ? 'up' : 'down';
+    return `
+      <div class="watch-item ${c.id===activeId?'active':''}" data-id="${c.id}">
+        <img src="${c.image}" alt="">
+        <div class="wname">${escapeHtml(c.name)}<small>${c.symbol.toUpperCase()}</small></div>
+        <div class="wprice">${price}<span class="chg ${chgClass}">${chg}</span></div>
+        <div class="remove" data-remove="${c.id}">✕</div>
+      </div>
+    `;
+  }).join('');
+  el.querySelectorAll('.watch-item').forEach(row => {
+    row.addEventListener('click', (e) => {
+      if(e.target.dataset.remove) return;
+      selectCoin(row.dataset.id);
+    });
+  });
+  el.querySelectorAll('[data-remove]').forEach(btn => {
+    btn.addEventListener('click', (e) => removeCoin(btn.dataset.remove, e));
+  });
+}
+
+/* ---------- Live prices for ticker + sidebar ---------- */
+async function refreshLivePrices(){
+  if(watchlist.length === 0) return;
+  const ids = watchlist.map(c => c.id).join(',');
+  try{
+    const res = await fetch(`${API}/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`);
+    const data = await res.json();
+    watchlist.forEach(c => {
+      if(data[c.id]){
+        livePrices[c.id] = { usd: data[c.id].usd, change24h: data[c.id].usd_24h_change };
+      }
+    });
+    renderWatchlist();
+    renderTicker();
+    if(activeId) updatePriceHeaderAndLadder();
+  }catch(err){ /* silent fail, will retry on interval */ }
+}
+
+function renderTicker(){
+  const track = document.getElementById('tickerTrack');
+  if(watchlist.length === 0){
+    track.innerHTML = '<span>Add coins to your watchlist to populate the ticker.</span>';
+    return;
+  }
+  const items = watchlist.map(c => {
+    const live = livePrices[c.id];
+    if(!live) return `<span>${c.symbol.toUpperCase()} …</span>`;
+    const cls = live.change24h >= 0 ? 'up' : 'down';
+    return `<span>${c.symbol.toUpperCase()} ${fmtPrice(live.usd)} <span class="${cls}">${fmtChange(live.change24h)}</span></span>`;
+  });
+  // duplicate for seamless scroll
+  track.innerHTML = items.join('') + items.join('');
+}
+
+/* ---------- Coin selection / chart ---------- */
+function selectCoin(id){
+  activeId = id;
+  currentRangeIdx = 2;
+  renderWatchlist();
+  renderMain();
+}
+
+function renderMain(){
+  const coin = watchlist.find(c => c.id === activeId);
+  if(!coin) return;
+  const live = livePrices[coin.id];
+  const main = document.getElementById('mainPanel');
+  main.innerHTML = `
+    <div class="coin-header">
+      <div class="coin-title">
+        <img src="${coin.image}" alt="">
+        <div>
+          <h2>${escapeHtml(coin.name)}</h2>
+          <div class="sym">${coin.symbol.toUpperCase()} / USD</div>
+        </div>
+      </div>
+      <div class="price-block" id="priceBlock">
+        <div class="price">${live ? fmtPrice(live.usd) : '…'}</div>
+        <div class="chg ${live && live.change24h>=0?'up':'down'}">${live ? fmtChange(live.change24h)+' (24h)' : ''}</div>
+      </div>
+    </div>
+
+    <div class="range-controls" id="rangeControls">
+      ${RANGES.map((r,i) => `<button data-idx="${i}" class="${i===currentRangeIdx?'active':''}">${r.label}</button>`).join('')}
+    </div>
+
+    <div class="chart-panel">
+      <div class="chart-wrap">
+        <canvas id="priceChart"></canvas>
+        <div class="chart-status" id="chartStatus" style="display:none;">Loading chart…</div>
+      </div>
+    </div>
+
+    <div class="ladder-panel">
+      <h3>Sale ladder</h3>
+      <div class="ladder-sub">Set up to three target prices. The chart marks them as lines; this shows how far the current price has to climb.</div>
+      <div class="rungs" id="rungs"></div>
+    </div>
+  `;
+
+  document.getElementById('rangeControls').querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentRangeIdx = parseInt(btn.dataset.idx, 10);
+      document.querySelectorAll('#rangeControls button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadChart();
+    });
+  });
+
+  renderRungs();
+  loadChart();
+}
+
+function updatePriceHeaderAndLadder(){
+  const coin = watchlist.find(c => c.id === activeId);
+  if(!coin) return;
+  const live = livePrices[coin.id];
+  const block = document.getElementById('priceBlock');
+  if(block && live){
+    block.innerHTML = `
+      <div class="price">${fmtPrice(live.usd)}</div>
+      <div class="chg ${live.change24h>=0?'up':'down'}">${fmtChange(live.change24h)} (24h)</div>
+    `;
+  }
+  renderRungs();
+}
+
+function renderRungs(){
+  const coin = watchlist.find(c => c.id === activeId);
+  if(!coin) return;
+  const live = livePrices[coin.id];
+  const container = document.getElementById('rungs');
+  if(!container) return;
+  container.innerHTML = coin.targets.map((t, i) => {
+    const hasTarget = t !== null && t !== '' && !isNaN(t);
+    let distHtml = '<span class="rung-dist">—</span>';
+    let fillPct = 0;
+    let stateClass = '';
+    if(hasTarget && live){
+      const target = parseFloat(t);
+      const cur = live.usd;
+      if(cur >= target){
+        distHtml = `<span class="rung-dist hit">Target reached</span>`;
+        fillPct = 100;
+        stateClass = 'hit';
+      } else {
+        const pct = (cur / target) * 100;
+        const remaining = (((target - cur) / cur) * 100);
+        distHtml = `<span class="rung-dist">+${remaining.toFixed(1)}% to go</span>`;
+        fillPct = Math.max(2, pct);
+        stateClass = 'pending';
+      }
+    }
+    return `
+      <div class="rung ${stateClass}">
+        <div class="rung-label">SALE ${i+1}</div>
+        <div class="rung-track"><div class="fill" style="width:${fillPct}%"></div></div>
+        <input type="number" step="any" placeholder="Target price (USD)" value="${hasTarget ? t : ''}" data-idx="${i}">
+        ${distHtml}
+        <div class="rung-clear" data-clear="${i}">✕</div>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const idx = parseInt(inp.dataset.idx, 10);
+      const v = inp.value.trim();
+      coin.targets[idx] = v === '' ? null : parseFloat(v);
+      save();
+      renderRungs();
+      if(chart) applyAnnotations();
+    });
+  });
+  container.querySelectorAll('[data-clear]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.clear, 10);
+      coin.targets[idx] = null;
+      save();
+      renderRungs();
+      if(chart) applyAnnotations();
+    });
+  });
+}
+
+/* ---------- Chart ---------- */
+async function loadChart(){
+  const coin = watchlist.find(c => c.id === activeId);
+  if(!coin) return;
+  const statusEl = document.getElementById('chartStatus');
+  statusEl.style.display = 'flex';
+  statusEl.textContent = 'Loading chart…';
+
+  const range = RANGES[currentRangeIdx];
+  try{
+    const res = await fetch(`${API}/coins/${coin.id}/market_chart?vs_currency=usd&days=${range.days}`);
+    if(!res.ok) throw new Error('bad response');
+    const data = await res.json();
+    const points = (data.prices || []).map(p => ({x: p[0], y: p[1]}));
+    statusEl.style.display = 'none';
+    drawChart(points, coin);
+  }catch(err){
+    statusEl.textContent = 'Could not load chart data (rate limit or network). Try again shortly.';
+  }
+}
+
+function drawChart(points, coin){
+  const ctx = document.getElementById('priceChart').getContext('2d');
+  if(chart) chart.destroy();
+
+  const isUp = points.length > 1 && points[points.length-1].y >= points[0].y;
+  const lineColor = isUp ? '#4F9D69' : '#C75450';
+
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [{
+        data: points,
+        borderColor: lineColor,
+        backgroundColor: isUp ? 'rgba(79,157,105,0.08)' : 'rgba(199,84,80,0.08)',
+        borderWidth: 1.6,
+        pointRadius: 0,
+        fill: true,
+        tension: 0.15,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: {
+          type: 'time',
+          grid: { color: '#2B333D' },
+          ticks: { color: '#8A9099', font: { family: 'IBM Plex Mono', size: 10 }, maxRotation:0 }
+        },
+        y: {
+          grid: { color: '#2B333D' },
+          ticks: {
+            color: '#8A9099',
+            font: { family: 'IBM Plex Mono', size: 10 },
+            callback: (v) => fmtPrice(v)
+          }
+        }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#202832',
+          borderColor: '#2B333D',
+          borderWidth: 1,
+          titleFont: { family: 'IBM Plex Mono', size: 11 },
+          bodyFont: { family: 'IBM Plex Mono', size: 12 },
+          callbacks: {
+            label: (item) => fmtPrice(item.parsed.y)
+          }
+        },
+        annotation: { annotations: {} }
+      }
+    }
+  });
+  applyAnnotations();
+}
+
+function applyAnnotations(){
+  const coin = watchlist.find(c => c.id === activeId);
+  if(!coin || !chart) return;
+  const annotations = {};
+  coin.targets.forEach((t, i) => {
+    if(t !== null && t !== '' && !isNaN(t)){
+      annotations['target'+i] = {
+        type: 'line',
+        yMin: t, yMax: t,
+        borderColor: '#C9A227',
+        borderWidth: 1.4,
+        borderDash: [5,4],
+        label: {
+          display: true,
+          content: `Sale ${i+1} — ${fmtPrice(parseFloat(t))}`,
+          position: 'end',
+          backgroundColor: '#C9A227',
+          color: '#12161B',
+          font: { family: 'IBM Plex Mono', size: 10, weight: '600' },
+          padding: 4
+        }
+      };
+    }
+  });
+  chart.options.plugins.annotation.annotations = annotations;
+  chart.update();
+}
+
+/* ---------- Init ---------- */
+renderWatchlist();
+renderTicker();
+refreshLivePrices();
+setInterval(refreshLivePrices, 45000); // poll every 45s, mindful of free-tier rate limits
+</script>
+</body>
+</html>
