@@ -422,6 +422,10 @@ const STORAGE_KEY = 'ledger_watchlist_v1';
 const API = 'https://api.coingecko.com/api/v3';
 
 let watchlist = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+watchlist.forEach(c => {
+  if(!Array.isArray(c.targets)) c.targets = [];
+  while(c.targets.length < 4) c.targets.push(null);
+});
 let activeId = null;
 let chart = null;
 let livePrices = {}; // id -> {usd, change24h}
@@ -509,7 +513,7 @@ function addCoin(coin){
   if(watchlist.find(c => c.id === coin.id)) { activeId = coin.id; renderWatchlist(); selectCoin(coin.id); return; }
   watchlist.push({
     id: coin.id, name: coin.name, symbol: coin.symbol, image: coin.image,
-    targets: [null, null, null]
+    targets: [null, null, null, null]
   });
   save();
   renderWatchlist();
@@ -631,7 +635,7 @@ function renderMain(){
 
     <div class="ladder-panel">
       <h3>Sale ladder</h3>
-      <div class="ladder-sub">Set up to three target prices. The chart marks them as lines; this shows how far the current price has to climb.</div>
+      <div class="ladder-sub">Set up to four target prices. The chart marks them as lines; this shows how far the current price has to climb.</div>
       <div class="rungs" id="rungs"></div>
     </div>
   `;
