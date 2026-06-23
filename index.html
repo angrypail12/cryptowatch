@@ -289,6 +289,53 @@
     color:var(--muted);font-family:var(--mono);font-size:12px;
   }
 
+  /* holdings */
+  .holdings-panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:16px 20px;
+  }
+  .holdings-row{
+    display:flex;
+    gap:20px;
+    align-items:flex-end;
+    flex-wrap:wrap;
+  }
+  .hfield{display:flex;flex-direction:column;gap:6px;min-width:140px;}
+  .hfield label{
+    font-family:var(--mono);
+    font-size:10.5px;
+    color:var(--muted);
+    letter-spacing:0.8px;
+    text-transform:uppercase;
+  }
+  .hfield input{
+    background:var(--panel-raised);
+    border:1px solid var(--line);
+    color:var(--text);
+    font-family:var(--mono);
+    font-size:14px;
+    padding:8px 10px;
+    border-radius:3px;
+    outline:none;
+    width:160px;
+  }
+  .hfield input:focus{border-color:var(--gold-dim);}
+  .holdings-summary{
+    font-family:var(--mono);
+    font-size:13px;
+    flex:1;
+    min-width:200px;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    justify-content:center;
+  }
+  .holdings-summary .up{color:var(--up);}
+  .holdings-summary .down{color:var(--down);}
+  .holdings-summary .hsummary-note{color:var(--muted);font-size:12px;}
+
   /* sale ladder */
   .ladder-panel{
     background:var(--panel);
@@ -314,10 +361,10 @@
   }
   .rung{
     display:grid;
-    grid-template-columns:70px 1fr 130px 90px 26px;
+    grid-template-columns:60px 1fr 80px 110px 140px 22px;
     align-items:center;
     gap:12px;
-    padding:10px 12px;
+    padding:12px;
     background:var(--panel-raised);
     border-radius:4px;
     border-left:3px solid var(--line);
@@ -330,12 +377,16 @@
     color:var(--muted);
     letter-spacing:1px;
   }
+  .rung-inputs{
+    display:flex;
+    gap:8px;
+  }
   .rung input[type=number]{
     background:var(--bg);
     border:1px solid var(--line);
     color:var(--text);
     font-family:var(--mono);
-    font-size:14px;
+    font-size:13px;
     padding:7px 9px;
     border-radius:3px;
     width:100%;
@@ -356,11 +407,24 @@
   }
   .rung-dist{
     font-family:var(--mono);
-    font-size:12px;
+    font-size:11.5px;
     text-align:right;
     color:var(--muted);
   }
   .rung-dist.hit{color:var(--up);}
+  .rung-proceeds{
+    font-family:var(--mono);
+    font-size:12.5px;
+    text-align:right;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    color:var(--text);
+  }
+  .rung-proceeds.muted{color:var(--muted);}
+  .rung-gain{font-size:11px;}
+  .rung-gain.up{color:var(--up);}
+  .rung-gain.down{color:var(--down);}
   .rung-clear{
     color:var(--muted);
     cursor:pointer;
@@ -424,7 +488,14 @@ const API = 'https://api.coingecko.com/api/v3';
 let watchlist = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
 watchlist.forEach(c => {
   if(!Array.isArray(c.targets)) c.targets = [];
-  while(c.targets.length < 4) c.targets.push(null);
+  // migrate old plain-number targets to {price, pct} objects
+  c.targets = c.targets.map(t => {
+    if(t === null || t === undefined) return {price: null, pct: null};
+    if(typeof t === 'object') return {price: t.price ?? null, pct: t.pct ?? null};
+    return {price: t, pct: null};
+  });
+  while(c.targets.length < 4) c.targets.push({price: null, pct: null});
+  if(!c.holdings) c.holdings = {amount: null, buyPrice: null};
 });
 let activeId = null;
 let chart = null;
@@ -513,7 +584,8 @@ function addCoin(coin){
   if(watchlist.find(c => c.id === coin.id)) { activeId = coin.id; renderWatchlist(); selectCoin(coin.id); return; }
   watchlist.push({
     id: coin.id, name: coin.name, symbol: coin.symbol, image: coin.image,
-    targets: [null, null, null, null]
+    targets: [{price:null,pct:null}, {price:null,pct:null}, {price:null,pct:null}, {price:null,pct:null}],
+    holdings: {amount: null, buyPrice: null}
   });
   save();
   renderWatchlist();
@@ -623,6 +695,20 @@ function renderMain(){
       </div>
     </div>
 
+    <div class="holdings-panel">
+      <div class="holdings-row">
+        <div class="hfield">
+          <label>Amount held</label>
+          <input type="number" step="any" id="holdingAmount" placeholder="e.g. 1.25" value="${coin.holdings.amount ?? ''}">
+        </div>
+        <div class="hfield">
+          <label>Avg. buy price (USD)</label>
+          <input type="number" step="any" id="holdingBuyPrice" placeholder="e.g. 42000" value="${coin.holdings.buyPrice ?? ''}">
+        </div>
+        <div class="hfield holdings-summary" id="holdingsSummary"></div>
+      </div>
+    </div>
+
     <div class="range-controls" id="rangeControls">
       ${RANGES.map((r,i) => `<button data-idx="${i}" class="${i===currentRangeIdx?'active':''}">${r.label}</button>`).join('')}
     </div>
@@ -636,7 +722,7 @@ function renderMain(){
 
     <div class="ladder-panel">
       <h3>Sale ladder</h3>
-      <div class="ladder-sub">Set up to four target prices. The chart marks them as lines; this shows how far the current price has to climb.</div>
+      <div class="ladder-sub">Set a target price and the % of your holdings to sell at each. Proceeds and gain/loss are calculated from your holdings above.</div>
       <div class="rungs" id="rungs"></div>
     </div>
   `;
@@ -650,8 +736,51 @@ function renderMain(){
     });
   });
 
+  document.getElementById('holdingAmount').addEventListener('change', (e) => {
+    const v = e.target.value.trim();
+    coin.holdings.amount = v === '' ? null : parseFloat(v);
+    save();
+    renderHoldingsSummary();
+    renderRungs();
+  });
+  document.getElementById('holdingBuyPrice').addEventListener('change', (e) => {
+    const v = e.target.value.trim();
+    coin.holdings.buyPrice = v === '' ? null : parseFloat(v);
+    save();
+    renderHoldingsSummary();
+    renderRungs();
+  });
+
+  renderHoldingsSummary();
   renderRungs();
   loadChart();
+}
+
+function renderHoldingsSummary(){
+  const coin = watchlist.find(c => c.id === activeId);
+  if(!coin) return;
+  const el = document.getElementById('holdingsSummary');
+  if(!el) return;
+  const { amount, buyPrice } = coin.holdings;
+  const live = livePrices[coin.id];
+  if(amount === null || amount === undefined || isNaN(amount)){
+    el.innerHTML = '<span class="hsummary-note">Add an amount to see current value.</span>';
+    return;
+  }
+  let html = '';
+  if(live){
+    const currentValue = amount * live.usd;
+    html += `<div>Current value: <strong>${fmtPrice(currentValue)}</strong></div>`;
+  }
+  if(buyPrice !== null && buyPrice !== undefined && !isNaN(buyPrice) && live){
+    const costBasis = amount * buyPrice;
+    const currentValue = amount * live.usd;
+    const gain = currentValue - costBasis;
+    const gainPct = costBasis !== 0 ? (gain / costBasis) * 100 : 0;
+    const cls = gain >= 0 ? 'up' : 'down';
+    html += `<div class="${cls}">${gain >= 0 ? '+' : ''}${fmtPrice(gain)} (${gain>=0?'+':''}${gainPct.toFixed(1)}%) unrealized</div>`;
+  }
+  el.innerHTML = html || '<span class="hsummary-note">—</span>';
 }
 
 function updatePriceHeaderAndLadder(){
@@ -665,6 +794,7 @@ function updatePriceHeaderAndLadder(){
       <div class="chg ${live.change24h>=0?'up':'down'}">${fmtChange(live.change24h)} (24h)</div>
     `;
   }
+  renderHoldingsSummary();
   renderRungs();
 }
 
@@ -674,32 +804,59 @@ function renderRungs(){
   const live = livePrices[coin.id];
   const container = document.getElementById('rungs');
   if(!container) return;
+  const amount = coin.holdings.amount;
+  const buyPrice = coin.holdings.buyPrice;
+  const hasAmount = amount !== null && amount !== undefined && !isNaN(amount);
+
   container.innerHTML = coin.targets.map((t, i) => {
-    const hasTarget = t !== null && t !== '' && !isNaN(t);
+    const price = t.price;
+    const pct = t.pct;
+    const hasTarget = price !== null && price !== '' && !isNaN(price);
+    const hasPct = pct !== null && pct !== '' && !isNaN(pct);
+
     let distHtml = '<span class="rung-dist">—</span>';
     let fillPct = 0;
     let stateClass = '';
     if(hasTarget && live){
-      const target = parseFloat(t);
+      const target = parseFloat(price);
       const cur = live.usd;
       if(cur >= target){
         distHtml = `<span class="rung-dist hit">Target reached</span>`;
         fillPct = 100;
         stateClass = 'hit';
       } else {
-        const pct = (cur / target) * 100;
+        const pctOfTarget = (cur / target) * 100;
         const remaining = (((target - cur) / cur) * 100);
         distHtml = `<span class="rung-dist">+${remaining.toFixed(1)}% to go</span>`;
-        fillPct = Math.max(2, pct);
+        fillPct = Math.max(2, pctOfTarget);
         stateClass = 'pending';
       }
     }
+
+    let proceedsHtml = '<span class="rung-proceeds muted">—</span>';
+    if(hasTarget && hasPct && hasAmount){
+      const sellAmount = amount * (parseFloat(pct) / 100);
+      const proceeds = sellAmount * parseFloat(price);
+      let gainHtml = '';
+      if(buyPrice !== null && buyPrice !== undefined && !isNaN(buyPrice)){
+        const cost = sellAmount * parseFloat(buyPrice);
+        const gain = proceeds - cost;
+        const cls = gain >= 0 ? 'up' : 'down';
+        gainHtml = `<span class="rung-gain ${cls}">${gain>=0?'+':''}${fmtPrice(gain)}</span>`;
+      }
+      proceedsHtml = `<span class="rung-proceeds"><strong>${fmtPrice(proceeds)}</strong>${gainHtml}</span>`;
+    }
+
     return `
       <div class="rung ${stateClass}">
         <div class="rung-label">SALE ${i+1}</div>
+        <div class="rung-inputs">
+          <input type="number" step="any" placeholder="Target price (USD)" value="${hasTarget ? price : ''}" data-idx="${i}" data-field="price">
+          <input type="number" step="any" min="0" max="100" placeholder="% of holdings" value="${hasPct ? pct : ''}" data-idx="${i}" data-field="pct">
+        </div>
         <div class="rung-track"><div class="fill" style="width:${fillPct}%"></div></div>
-        <input type="number" step="any" placeholder="Target price (USD)" value="${hasTarget ? t : ''}" data-idx="${i}">
         ${distHtml}
+        ${proceedsHtml}
         <div class="rung-clear" data-clear="${i}">✕</div>
       </div>
     `;
@@ -708,8 +865,9 @@ function renderRungs(){
   container.querySelectorAll('input').forEach(inp => {
     inp.addEventListener('change', () => {
       const idx = parseInt(inp.dataset.idx, 10);
+      const field = inp.dataset.field;
       const v = inp.value.trim();
-      coin.targets[idx] = v === '' ? null : parseFloat(v);
+      coin.targets[idx][field] = v === '' ? null : parseFloat(v);
       save();
       renderRungs();
       if(chart) applyAnnotations();
@@ -718,7 +876,7 @@ function renderRungs(){
   container.querySelectorAll('[data-clear]').forEach(btn => {
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.dataset.clear, 10);
-      coin.targets[idx] = null;
+      coin.targets[idx] = {price: null, pct: null};
       save();
       renderRungs();
       if(chart) applyAnnotations();
@@ -842,16 +1000,17 @@ function applyAnnotations(){
   if(!coin || !chart) return;
   const annotations = {};
   coin.targets.forEach((t, i) => {
-    if(t !== null && t !== '' && !isNaN(t)){
+    const price = t.price;
+    if(price !== null && price !== '' && !isNaN(price)){
       annotations['target'+i] = {
         type: 'line',
-        yMin: t, yMax: t,
+        yMin: price, yMax: price,
         borderColor: '#C9A227',
         borderWidth: 1.4,
         borderDash: [5,4],
         label: {
           display: true,
-          content: `Sale ${i+1} — ${fmtPrice(parseFloat(t))}`,
+          content: `Sale ${i+1} — ${fmtPrice(parseFloat(price))}${t.pct ? ` (${t.pct}%)` : ''}`,
           position: 'end',
           backgroundColor: '#C9A227',
           color: '#12161B',
