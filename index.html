@@ -361,7 +361,7 @@
   }
   .rung{
     display:grid;
-    grid-template-columns:60px 1fr 80px 110px 140px 22px;
+    grid-template-columns:60px 1fr 80px 110px 150px 64px 22px;
     align-items:center;
     gap:12px;
     padding:12px;
@@ -370,6 +370,8 @@
     border-left:3px solid var(--line);
   }
   .rung.hit{border-left-color:var(--up);}
+  .rung.completed{border-left-color:var(--up);opacity:0.7;}
+  .rung.completed .rung-inputs input{color:var(--muted);}
   .rung.pending{border-left-color:var(--gold);}
   .rung-label{
     font-family:var(--mono);
@@ -432,6 +434,18 @@
     font-size:13px;
   }
   .rung-clear:hover{color:var(--down);}
+  .rung-sold-toggle{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--muted);
+    cursor:pointer;
+    justify-content:center;
+  }
+  .rung-sold-toggle input{accent-color:var(--gold);cursor:pointer;}
+  .rung-pct{color:var(--muted);font-size:10.5px;}
 
   .ladder-total{
     margin-top:14px;
@@ -523,14 +537,15 @@ const API = 'https://api.coingecko.com/api/v3';
 let watchlist = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
 watchlist.forEach(c => {
   if(!Array.isArray(c.targets)) c.targets = [];
-  // migrate old plain-number targets to {price, pct} objects
+  // migrate old plain-number targets to {price, pct, completed} objects
   c.targets = c.targets.map(t => {
-    if(t === null || t === undefined) return {price: null, pct: null};
-    if(typeof t === 'object') return {price: t.price ?? null, pct: t.pct ?? null};
-    return {price: t, pct: null};
+    if(t === null || t === undefined) return {price: null, pct: null, completed: false};
+    if(typeof t === 'object') return {price: t.price ?? null, pct: t.pct ?? null, completed: t.completed ?? false};
+    return {price: t, pct: null, completed: false};
   });
-  while(c.targets.length < 4) c.targets.push({price: null, pct: null});
-  if(!c.holdings) c.holdings = {amount: null, buyPrice: null};
+  while(c.targets.length < 4) c.targets.push({price: null, pct: null, completed: false});
+  if(!c.holdings) c.holdings = {amount: null, buyPrice: null, purchaseDate: null};
+  if(c.holdings.purchaseDate === undefined) c.holdings.purchaseDate = null;
 });
 let activeId = null;
 let chart = null;
@@ -619,8 +634,8 @@ function addCoin(coin){
   if(watchlist.find(c => c.id === coin.id)) { activeId = coin.id; renderWatchlist(); selectCoin(coin.id); return; }
   watchlist.push({
     id: coin.id, name: coin.name, symbol: coin.symbol, image: coin.image,
-    targets: [{price:null,pct:null}, {price:null,pct:null}, {price:null,pct:null}, {price:null,pct:null}],
-    holdings: {amount: null, buyPrice: null}
+    targets: [{price:null,pct:null,completed:false}, {price:null,pct:null,completed:false}, {price:null,pct:null,completed:false}, {price:null,pct:null,completed:false}],
+    holdings: {amount: null, buyPrice: null, purchaseDate: null}
   });
   save();
   renderWatchlist();
@@ -740,6 +755,10 @@ function renderMain(){
           <label>Avg. buy price (USD)</label>
           <input type="number" step="any" id="holdingBuyPrice" placeholder="e.g. 42000" value="${coin.holdings.buyPrice ?? ''}">
         </div>
+        <div class="hfield">
+          <label>Purchase date</label>
+          <input type="date" id="holdingPurchaseDate" value="${coin.holdings.purchaseDate ?? ''}">
+        </div>
         <div class="hfield holdings-summary" id="holdingsSummary"></div>
       </div>
     </div>
@@ -786,6 +805,12 @@ function renderMain(){
     renderHoldingsSummary();
     renderRungs();
   });
+  document.getElementById('holdingPurchaseDate').addEventListener('change', (e) => {
+    const v = e.target.value.trim();
+    coin.holdings.purchaseDate = v === '' ? null : v;
+    save();
+    renderHoldingsSummary();
+  });
 
   renderHoldingsSummary();
   renderRungs();
@@ -797,7 +822,7 @@ function renderHoldingsSummary(){
   if(!coin) return;
   const el = document.getElementById('holdingsSummary');
   if(!el) return;
-  const { amount, buyPrice } = coin.holdings;
+  const { amount, buyPrice, purchaseDate } = coin.holdings;
   const live = livePrices[coin.id];
   if(amount === null || amount === undefined || isNaN(amount)){
     el.innerHTML = '<span class="hsummary-note">Add an amount to see current value.</span>';
@@ -815,6 +840,12 @@ function renderHoldingsSummary(){
     const gainPct = costBasis !== 0 ? (gain / costBasis) * 100 : 0;
     const cls = gain >= 0 ? 'up' : 'down';
     html += `<div class="${cls}">${gain >= 0 ? '+' : ''}${fmtPrice(gain)} (${gain>=0?'+':''}${gainPct.toFixed(1)}%) unrealized</div>`;
+  }
+  if(purchaseDate){
+    const days = Math.floor((Date.now() - new Date(purchaseDate + 'T00:00:00').getTime()) / 86400000);
+    if(!isNaN(days) && days >= 0){
+      html += `<div class="hsummary-note">Held ${days} day${days===1?'':'s'}</div>`;
+    }
   }
   el.innerHTML = html || '<span class="hsummary-note">—</span>';
 }
@@ -847,13 +878,19 @@ function renderRungs(){
   container.innerHTML = coin.targets.map((t, i) => {
     const price = t.price;
     const pct = t.pct;
+    const completed = !!t.completed;
     const hasTarget = price !== null && price !== '' && !isNaN(price);
     const hasPct = pct !== null && pct !== '' && !isNaN(pct);
 
     let distHtml = '<span class="rung-dist">—</span>';
     let fillPct = 0;
     let stateClass = '';
-    if(hasTarget && live){
+
+    if(completed){
+      distHtml = `<span class="rung-dist hit">✓ Sold</span>`;
+      fillPct = 100;
+      stateClass = 'completed';
+    } else if(hasTarget && live){
       const target = parseFloat(price);
       const cur = live.usd;
       if(cur >= target){
@@ -878,7 +915,8 @@ function renderRungs(){
         const cost = sellAmount * parseFloat(buyPrice);
         const gain = proceeds - cost;
         const cls = gain >= 0 ? 'up' : 'down';
-        gainHtml = `<span class="rung-gain ${cls}">${gain>=0?'+':''}${fmtPrice(gain)}</span>`;
+        const priceIncreasePct = buyPrice !== 0 ? ((parseFloat(price) - parseFloat(buyPrice)) / parseFloat(buyPrice)) * 100 : 0;
+        gainHtml = `<span class="rung-gain ${cls}">${gain>=0?'+':''}${fmtPrice(gain)} <span class="rung-pct">(${priceIncreasePct>=0?'+':''}${priceIncreasePct.toFixed(1)}%)</span></span>`;
       }
       proceedsHtml = `<span class="rung-proceeds"><strong>${fmtPrice(proceeds)}</strong>${gainHtml}</span>`;
     }
@@ -887,18 +925,22 @@ function renderRungs(){
       <div class="rung ${stateClass}">
         <div class="rung-label">SALE ${i+1}</div>
         <div class="rung-inputs">
-          <input type="number" step="any" placeholder="Target price (USD)" value="${hasTarget ? price : ''}" data-idx="${i}" data-field="price">
-          <input type="number" step="any" min="0" max="100" placeholder="% of holdings" value="${hasPct ? pct : ''}" data-idx="${i}" data-field="pct">
+          <input type="number" step="any" placeholder="Target price (USD)" value="${hasTarget ? price : ''}" data-idx="${i}" data-field="price" ${completed?'disabled':''}>
+          <input type="number" step="any" min="0" max="100" placeholder="% of holdings" value="${hasPct ? pct : ''}" data-idx="${i}" data-field="pct" ${completed?'disabled':''}>
         </div>
         <div class="rung-track"><div class="fill" style="width:${fillPct}%"></div></div>
         ${distHtml}
         ${proceedsHtml}
+        <label class="rung-sold-toggle">
+          <input type="checkbox" data-sold-idx="${i}" ${completed?'checked':''}>
+          <span>Sold</span>
+        </label>
         <div class="rung-clear" data-clear="${i}">✕</div>
       </div>
     `;
   }).join('');
 
-  container.querySelectorAll('input').forEach(inp => {
+  container.querySelectorAll('input[data-field]').forEach(inp => {
     inp.addEventListener('change', () => {
       const idx = parseInt(inp.dataset.idx, 10);
       const field = inp.dataset.field;
@@ -909,10 +951,19 @@ function renderRungs(){
       if(chart) applyAnnotations();
     });
   });
+  container.querySelectorAll('[data-sold-idx]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const idx = parseInt(cb.dataset.soldIdx, 10);
+      coin.targets[idx].completed = cb.checked;
+      save();
+      renderRungs();
+      if(chart) applyAnnotations();
+    });
+  });
   container.querySelectorAll('[data-clear]').forEach(btn => {
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.dataset.clear, 10);
-      coin.targets[idx] = {price: null, pct: null};
+      coin.targets[idx] = {price: null, pct: null, completed: false};
       save();
       renderRungs();
       if(chart) applyAnnotations();
@@ -932,10 +983,8 @@ function renderLadderTotal(){
   const buyPrice = coin.holdings.buyPrice;
   const hasAmount = amount !== null && amount !== undefined && !isNaN(amount);
 
-  let totalProceeds = 0;
-  let totalPct = 0;
-  let totalCost = 0;
-  let anyValid = false;
+  let pendingProceeds = 0, pendingPct = 0, pendingCost = 0, anyPending = false;
+  let realizedProceeds = 0, realizedPct = 0, realizedCost = 0, anyRealized = false;
   let costKnown = buyPrice !== null && buyPrice !== undefined && !isNaN(buyPrice);
 
   coin.targets.forEach(t => {
@@ -945,33 +994,56 @@ function renderLadderTotal(){
     const hasPct = pct !== null && pct !== '' && !isNaN(pct);
     if(hasTarget && hasPct && hasAmount){
       const sellAmount = amount * (parseFloat(pct) / 100);
-      totalProceeds += sellAmount * parseFloat(price);
-      totalPct += parseFloat(pct);
-      if(costKnown) totalCost += sellAmount * parseFloat(buyPrice);
-      anyValid = true;
+      const proceeds = sellAmount * parseFloat(price);
+      const cost = costKnown ? sellAmount * parseFloat(buyPrice) : 0;
+      if(t.completed){
+        realizedProceeds += proceeds;
+        realizedPct += parseFloat(pct);
+        if(costKnown) realizedCost += cost;
+        anyRealized = true;
+      } else {
+        pendingProceeds += proceeds;
+        pendingPct += parseFloat(pct);
+        if(costKnown) pendingCost += cost;
+        anyPending = true;
+      }
     }
   });
 
-  if(!anyValid){
+  if(!anyPending && !anyRealized){
     el.innerHTML = '<span class="lt-note">Fill in a target price, a % of holdings, and your amount held above to see projected totals.</span>';
     return;
   }
 
-  let gainHtml = '';
-  if(costKnown){
-    const gain = totalProceeds - totalCost;
-    const gainPct = totalCost !== 0 ? (gain / totalCost) * 100 : 0;
+  function gainSpan(proceeds, cost){
+    if(!costKnown) return '';
+    const gain = proceeds - cost;
+    const gainPct = cost !== 0 ? (gain / cost) * 100 : 0;
     const cls = gain >= 0 ? 'up' : 'down';
-    gainHtml = `<span class="lt-gain ${cls}">${gain>=0?'+':''}${fmtPrice(gain)} (${gain>=0?'+':''}${gainPct.toFixed(1)}%)</span>`;
+    return `<span class="lt-gain ${cls}">${gain>=0?'+':''}${fmtPrice(gain)} (${gain>=0?'+':''}${gainPct.toFixed(1)}%)</span>`;
   }
 
-  const overAllocated = totalPct > 100;
+  const overAllocated = (pendingPct + realizedPct) > 100;
+  let rows = '';
+
+  if(anyPending){
+    rows += `
+      <span class="lt-label">Projected (pending)</span>
+      <span class="lt-value">${fmtPrice(pendingProceeds)}</span>
+      ${gainSpan(pendingProceeds, pendingCost)}
+    `;
+  }
+  if(anyRealized){
+    rows += `
+      <span class="lt-label">Realized (sold)</span>
+      <span class="lt-value" style="color:var(--up);">${fmtPrice(realizedProceeds)}</span>
+      ${gainSpan(realizedProceeds, realizedCost)}
+    `;
+  }
 
   el.innerHTML = `
-    <span class="lt-label">Total projected proceeds</span>
-    <span class="lt-value">${fmtPrice(totalProceeds)}</span>
-    ${gainHtml}
-    ${overAllocated ? `<span class="lt-note" style="color:var(--down);">Heads up — tiers add up to ${totalPct.toFixed(1)}% of your holdings, over 100%.</span>` : `<span class="lt-note">Across ${totalPct.toFixed(1)}% of current holdings allocated to a sale tier.</span>`}
+    ${rows}
+    ${overAllocated ? `<span class="lt-note" style="color:var(--down);">Heads up — tiers add up to ${(pendingPct+realizedPct).toFixed(1)}% of your holdings, over 100%.</span>` : `<span class="lt-note">${(pendingPct+realizedPct).toFixed(1)}% of current holdings allocated across tiers.</span>`}
   `;
 }
 
@@ -1093,17 +1165,18 @@ function applyAnnotations(){
   coin.targets.forEach((t, i) => {
     const price = t.price;
     if(price !== null && price !== '' && !isNaN(price)){
+      const color = t.completed ? '#4F9D69' : '#C9A227';
       annotations['target'+i] = {
         type: 'line',
         yMin: price, yMax: price,
-        borderColor: '#C9A227',
+        borderColor: color,
         borderWidth: 1.4,
-        borderDash: [5,4],
+        borderDash: t.completed ? [] : [5,4],
         label: {
           display: true,
-          content: `Sale ${i+1} — ${fmtPrice(parseFloat(price))}${t.pct ? ` (${t.pct}%)` : ''}`,
+          content: `Sale ${i+1}${t.completed ? ' (sold)' : ''} — ${fmtPrice(parseFloat(price))}${t.pct ? ` (${t.pct}%)` : ''}`,
           position: 'end',
-          backgroundColor: '#C9A227',
+          backgroundColor: color,
           color: '#12161B',
           font: { family: 'IBM Plex Mono', size: 10, weight: '600' },
           padding: 4
