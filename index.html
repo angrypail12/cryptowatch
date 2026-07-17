@@ -187,6 +187,46 @@
   ::-webkit-scrollbar{width:8px;}
   ::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
   footer.note{padding:18px 32px 30px;color:var(--muted);font-size:11.5px;border-top:1px solid var(--line);font-family:var(--mono);line-height:1.6;}
+
+  /* sync button */
+  .sync-btn{
+    background:var(--gold);color:var(--bg);
+    border:none;border-radius:3px;
+    font-family:var(--mono);font-size:11.5px;font-weight:600;
+    padding:7px 14px;cursor:pointer;letter-spacing:0.4px;white-space:nowrap;
+  }
+  .sync-btn:hover{filter:brightness(1.1);}
+  .sync-btn:disabled{opacity:0.5;cursor:default;}
+  .sync-btn.secondary{background:transparent;border:1px solid var(--line);color:var(--muted);font-size:14px;padding:6px 10px;}
+  .sync-btn.secondary:hover{border-color:var(--gold-dim);color:var(--text);}
+  .sync-btn.syncing{background:var(--muted);}
+  .sync-btn.ok{background:var(--up);}
+  .sync-btn.err{background:var(--down);}
+
+  /* settings modal */
+  .modal-backdrop{
+    position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:100;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .modal-backdrop.hidden{display:none;}
+  .modal{
+    background:var(--panel);border:1px solid var(--line);border-radius:6px;
+    padding:28px 32px;max-width:540px;width:90%;
+  }
+  .modal h2{font-family:var(--serif);font-size:20px;margin:0 0 6px;}
+  .modal p{color:var(--muted);font-size:13px;line-height:1.6;margin:0 0 18px;}
+  .modal ol{color:var(--muted);font-size:13px;line-height:1.9;margin:0 0 18px;padding-left:20px;}
+  .modal ol li strong{color:var(--text);}
+  .modal input[type=text]{
+    width:100%;background:var(--panel-raised);border:1px solid var(--line);
+    color:var(--text);font-family:var(--mono);font-size:13px;
+    padding:9px 12px;border-radius:3px;outline:none;margin-bottom:14px;
+  }
+  .modal input:focus{border-color:var(--gold-dim);}
+  .modal-actions{display:flex;gap:10px;justify-content:flex-end;}
+  .btn-primary{background:var(--gold);color:var(--bg);border:none;border-radius:3px;font-family:var(--mono);font-size:12px;font-weight:600;padding:8px 18px;cursor:pointer;}
+  .btn-secondary{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:3px;font-family:var(--mono);font-size:12px;padding:8px 18px;cursor:pointer;}
+  .btn-secondary:hover{border-color:var(--gold-dim);color:var(--text);}
 </style>
 </head>
 <body>
@@ -197,7 +237,11 @@
 
 <header class="masthead">
   <h1>LEDGER <span class="rule">/</span> watch</h1>
-  <div class="sub">PERSONAL CRYPTO WATCHLIST — DATA: COINGECKO</div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div class="sub">PERSONAL CRYPTO WATCHLIST — DATA: COINGECKO</div>
+    <button class="sync-btn" id="syncBtn" title="Sync to Google Sheets">⬆ Sync to Sheets</button>
+    <button class="sync-btn secondary" id="syncSettingsBtn" title="Configure sync URL">⚙</button>
+  </div>
 </header>
 
 <div class="layout">
@@ -841,11 +885,156 @@ function applyAnnotations(){
   chart.update();
 }
 
+/* ---------- Google Sheets Sync ---------- */
+const SYNC_URL_KEY = 'ledger_sync_url';
+
+function getSyncUrl(){ return localStorage.getItem(SYNC_URL_KEY) || ''; }
+
+// Settings modal
+document.getElementById('syncSettingsBtn').addEventListener('click', () => {
+  document.getElementById('syncUrlInput').value = getSyncUrl();
+  document.getElementById('syncModal').classList.remove('hidden');
+});
+document.getElementById('syncModalCancel').addEventListener('click', () => {
+  document.getElementById('syncModal').classList.add('hidden');
+});
+document.getElementById('syncModalSave').addEventListener('click', () => {
+  const url = document.getElementById('syncUrlInput').value.trim();
+  localStorage.setItem(SYNC_URL_KEY, url);
+  document.getElementById('syncModal').classList.add('hidden');
+});
+document.getElementById('syncModal').addEventListener('click', e => {
+  if(e.target === document.getElementById('syncModal'))
+    document.getElementById('syncModal').classList.add('hidden');
+});
+
+// Build flat row array for every sale tier across every lot across every coin
+function buildSyncRows(){
+  const now = new Date().toLocaleString();
+  const rows = [];
+  watchlist.forEach(coin => {
+    const live = livePrices[coin.id];
+    const currentPrice = live ? live.usd : null;
+    coin.lots.forEach(lot => {
+      const { amount, buyPrice, purchaseDate, targets, label } = lot;
+      const hasAmount = amount !== null && amount !== undefined && !isNaN(amount);
+      const hasBuy = buyPrice !== null && buyPrice !== undefined && !isNaN(buyPrice);
+
+      const currentValue = hasAmount && currentPrice ? amount * currentPrice : null;
+      const unrealizedDollar = hasAmount && hasBuy && currentPrice ? (amount * currentPrice) - (amount * buyPrice) : null;
+      const unrealizedPct = hasBuy && unrealizedDollar !== null && buyPrice !== 0 ? (unrealizedDollar / (amount * buyPrice)) * 100 : null;
+
+      let daysHeld = null;
+      if(purchaseDate){
+        const d = Math.floor((Date.now() - new Date(purchaseDate + 'T00:00:00').getTime()) / 86400000);
+        if(!isNaN(d) && d >= 0) daysHeld = d;
+      }
+
+      targets.forEach((t, i) => {
+        const hasTarget = t.price !== null && t.price !== '' && !isNaN(t.price);
+        const hasPct   = t.pct   !== null && t.pct   !== '' && !isNaN(t.pct);
+
+        let proceeds = null, plDollar = null, plPct = null;
+        if(hasTarget && hasPct && hasAmount){
+          const sellAmt = amount * (parseFloat(t.pct) / 100);
+          proceeds = sellAmt * parseFloat(t.price);
+          if(hasBuy){
+            plDollar = proceeds - sellAmt * buyPrice;
+            plPct = buyPrice !== 0 ? ((parseFloat(t.price) - buyPrice) / buyPrice) * 100 : null;
+          }
+        }
+
+        let status = '—';
+        if(t.completed) status = 'Sold';
+        else if(hasTarget && currentPrice !== null && currentPrice >= parseFloat(t.price)) status = 'Target reached';
+        else if(hasTarget) status = 'Pending';
+
+        rows.push([
+          coin.name,                                          // Coin
+          coin.symbol.toUpperCase(),                         // Symbol
+          label,                                             // Lot
+          hasAmount ? amount : '',                           // Amount Held
+          hasBuy ? buyPrice : '',                            // Buy Price
+          purchaseDate || '',                                // Purchase Date
+          daysHeld !== null ? daysHeld : '',                 // Days Held
+          currentPrice !== null ? currentPrice : '',         // Current Price
+          currentValue !== null ? currentValue : '',         // Current Value
+          unrealizedDollar !== null ? unrealizedDollar : '', // Unrealized P/L $
+          unrealizedPct !== null ? unrealizedPct : '',       // Unrealized P/L %
+          i + 1,                                             // Sale #
+          hasTarget ? parseFloat(t.price) : '',              // Target Price
+          hasPct ? parseFloat(t.pct) : '',                   // % to Sell
+          proceeds !== null ? proceeds : '',                 // Projected Proceeds
+          plDollar !== null ? plDollar : '',                 // P/L vs Buy $
+          plPct !== null ? plPct : '',                       // P/L vs Buy %
+          status,                                            // Status
+          now                                                // Last Synced
+        ]);
+      });
+    });
+  });
+  return rows;
+}
+
+document.getElementById('syncBtn').addEventListener('click', async () => {
+  const url = getSyncUrl();
+  const btn = document.getElementById('syncBtn');
+  if(!url){
+    document.getElementById('syncUrlInput').value = '';
+    document.getElementById('syncModal').classList.remove('hidden');
+    return;
+  }
+  if(!watchlist.length){ btn.textContent = 'Nothing to sync'; setTimeout(()=>{btn.textContent='⬆ Sync to Sheets';},2000); return; }
+
+  btn.textContent = 'Syncing…';
+  btn.className = 'sync-btn syncing';
+  btn.disabled = true;
+
+  const rows = buildSyncRows();
+  try {
+    // no-cors: data is sent; response isn't readable cross-origin, which is fine
+    await fetch(url, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows })
+    });
+    btn.textContent = '✓ Synced';
+    btn.className = 'sync-btn ok';
+  } catch(err) {
+    btn.textContent = '✕ Failed';
+    btn.className = 'sync-btn err';
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { btn.textContent = '⬆ Sync to Sheets'; btn.className = 'sync-btn'; }, 3000);
+  }
+});
+
 /* ---------- Init ---------- */
 renderWatchlist();
 renderTicker();
 refreshLivePrices();
 setInterval(refreshLivePrices,75000);
 </script>
+<!-- Sync settings modal -->
+<div class="modal-backdrop hidden" id="syncModal">
+  <div class="modal">
+    <h2>Sync to Google Sheets</h2>
+    <p>Every sync does a full replace — the sheet is wiped and rewritten from your tracker. No duplicates, ever. The tracker is always the source of truth.</p>
+    <ol>
+      <li>Open your Google Sheet → <strong>Extensions → Apps Script</strong></li>
+      <li>Paste the contents of <strong>google-apps-script.js</strong></li>
+      <li>Click <strong>Deploy → New deployment</strong></li>
+      <li>Type: <strong>Web app</strong> · Execute as: <strong>Me</strong> · Access: <strong>Anyone</strong></li>
+      <li>Copy the <strong>Web App URL</strong> and paste it below</li>
+    </ol>
+    <input type="text" id="syncUrlInput" placeholder="https://script.google.com/macros/s/…/exec">
+    <div class="modal-actions">
+      <button class="btn-secondary" id="syncModalCancel">Cancel</button>
+      <button class="btn-primary" id="syncModalSave">Save URL</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
