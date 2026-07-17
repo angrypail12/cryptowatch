@@ -265,6 +265,26 @@
   Your watchlist and price targets are stored only in this browser (localStorage).
 </footer>
 
+<!-- Sync settings modal — must be before the script block -->
+<div class="modal-backdrop hidden" id="syncModal">
+  <div class="modal">
+    <h2>Sync to Google Sheets</h2>
+    <p>Every sync does a full replace — the sheet is wiped and rewritten from your tracker. No duplicates, ever. The tracker is always the source of truth.</p>
+    <ol>
+      <li>Open your Google Sheet → <strong>Extensions → Apps Script</strong></li>
+      <li>Paste the contents of <strong>google-apps-script.js</strong></li>
+      <li>Click <strong>Deploy → New deployment</strong></li>
+      <li>Type: <strong>Web app</strong> · Execute as: <strong>Me</strong> · Access: <strong>Anyone</strong></li>
+      <li>Copy the <strong>Web App URL</strong> and paste it below</li>
+    </ol>
+    <input type="text" id="syncUrlInput" placeholder="https://script.google.com/macros/s/…/exec">
+    <div class="modal-actions">
+      <button class="btn-secondary" id="syncModalCancel">Cancel</button>
+      <button class="btn-primary" id="syncModalSave">Save URL</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const STORAGE_KEY = 'ledger_watchlist_v2';
 const API = 'https://api.coingecko.com/api/v3';
@@ -1016,25 +1036,5 @@ renderTicker();
 refreshLivePrices();
 setInterval(refreshLivePrices,75000);
 </script>
-<!-- Sync settings modal -->
-<div class="modal-backdrop hidden" id="syncModal">
-  <div class="modal">
-    <h2>Sync to Google Sheets</h2>
-    <p>Every sync does a full replace — the sheet is wiped and rewritten from your tracker. No duplicates, ever. The tracker is always the source of truth.</p>
-    <ol>
-      <li>Open your Google Sheet → <strong>Extensions → Apps Script</strong></li>
-      <li>Paste the contents of <strong>google-apps-script.js</strong></li>
-      <li>Click <strong>Deploy → New deployment</strong></li>
-      <li>Type: <strong>Web app</strong> · Execute as: <strong>Me</strong> · Access: <strong>Anyone</strong></li>
-      <li>Copy the <strong>Web App URL</strong> and paste it below</li>
-    </ol>
-    <input type="text" id="syncUrlInput" placeholder="https://script.google.com/macros/s/…/exec">
-    <div class="modal-actions">
-      <button class="btn-secondary" id="syncModalCancel">Cancel</button>
-      <button class="btn-primary" id="syncModalSave">Save URL</button>
-    </div>
-  </div>
-</div>
-
 </body>
 </html>
