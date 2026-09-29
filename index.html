@@ -296,7 +296,8 @@ const STORAGE_KEY = 'ledger_watchlist_v2';
 const API = 'https://api.coingecko.com/api/v3';
 const CG_KEY_STORAGE = 'ledger_cg_api_key';
 function getCgKey(){ return localStorage.getItem(CG_KEY_STORAGE) || ''; }
-function cgHeaders(){ const k=getCgKey(); return k ? {'x-cg-demo-api-key':k} : {}; }
+function cgHeaders(){ return {}; } // headers not used — key goes as query param to avoid CORS preflight
+function withKey(url){ const k=getCgKey(); return k ? `${url}${url.includes('?')?'&':'?'}x_cg_demo_api_key=${encodeURIComponent(k)}` : url; }
 
 /* ---------- helpers ---------- */
 function makeLot(label){
@@ -394,7 +395,7 @@ document.addEventListener('click', e=>{
 
 async function doSearch(q){
   try{
-    const res = await fetchWithRetry(`${API}/search?query=${encodeURIComponent(q)}`,2,cgHeaders());
+    const res = await fetchWithRetry(withKey(`${API}/search?query=${encodeURIComponent(q)}`),2);
     const data = await res.json();
     const coins = (data.coins||[]).slice(0,12);
     if(!coins.length){
@@ -462,14 +463,13 @@ function renderWatchlist(){
 }
 
 /* ---------- Live prices ---------- */
-async function fetchWithRetry(url,attempts=2,headers={}){
-  const opts=Object.keys(headers).length?{headers}:{};
+async function fetchWithRetry(url,attempts=2){
   for(let i=0;i<attempts;i++){
-    const res=await fetch(url,opts);
+    const res=await fetch(url);
     if(res.status===429){await new Promise(r=>setTimeout(r,5000*(i+1)));continue;}
     return res;
   }
-  return fetch(url,opts);
+  return fetch(url);
 }
 
 let priceError = null; // null | 'rate-limit' | 'api-error' | 'network'
@@ -478,7 +478,7 @@ async function refreshLivePrices(){
   if(!watchlist.length) return;
   const ids=watchlist.map(c=>c.id).join(',');
   try{
-    const res=await fetchWithRetry(`${API}/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`,2,cgHeaders());
+    const res=await fetchWithRetry(withKey(`${API}/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`),2);
     if(res.status===429){
       priceError='rate-limit';
       renderWatchlist(); renderTicker(); return;
@@ -872,7 +872,7 @@ async function loadChart(){
   }
   statusEl.style.display='flex'; statusEl.textContent='Loading chart…';
   try{
-    const res=await fetchWithRetry(`${API}/coins/${coin.id}/market_chart?vs_currency=usd&days=${range.days}`,2,cgHeaders());
+    const res=await fetchWithRetry(withKey(`${API}/coins/${coin.id}/market_chart?vs_currency=usd&days=${range.days}`),2);
     if(res.status===429){statusEl.textContent='Rate limited — try again in a minute, or add a free CoinGecko API key in Settings (⚙).';return;}
     if(!res.ok){statusEl.textContent=`API error ${res.status} — if this persists, add a free CoinGecko API key in Settings (⚙).`;return;}
     const data=await res.json();
