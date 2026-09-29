@@ -1033,8 +1033,9 @@ document.getElementById('syncBtn').addEventListener('click', async () => {
 /* ---------- Init ---------- */
 renderWatchlist();
 renderTicker();
-refreshLivePrices();
-setInterval(refreshLivePrices,75000);
+// Stagger the first price fetch by 2s so it doesn't race with the chart request on load
+setTimeout(refreshLivePrices, 2000);
+setInterval(refreshLivePrices, 90000);
 </script>
 </body>
 </html>
